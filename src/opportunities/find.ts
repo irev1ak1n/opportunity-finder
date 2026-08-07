@@ -8,6 +8,7 @@ import type { Opportunity } from "../types.js";
 export interface RankedOpportunity {
     opportunity: Opportunity;
     fingerprint: string;
+    opportunity_id?: string;
     eligibility_status: EligibilityStatus;
     eligibility_reasons: string[];
     match_score: number;
@@ -48,7 +49,8 @@ function scoreOpportunity(
 }
 
 export async function findScholarships(
-    profile: StudentProfile & { interests?: string[] }
+    profile: StudentProfile & { interests?: string[] },
+    userId?: string
 ): Promise<RankedOpportunity[]> {
     const queries = buildQueries(profile);
 
@@ -86,14 +88,18 @@ export async function findScholarships(
     }
 
     const ranked = [...byFingerprint.values()].sort((a, b) => b.match_score - a.match_score);
+    const top = ranked.slice(0, 5);
 
-    await saveToCache(ranked);
+    const withIds = await saveAndRecord(top, userId);
 
-    return ranked.slice(0, 5);
+    return withIds;
 }
 
-async function saveToCache(ranked: RankedOpportunity[]): Promise<void> {
-    if (ranked.length === 0) return;
+async function saveAndRecord(
+    ranked: RankedOpportunity[],
+    userId?: string
+): Promise<RankedOpportunity[]> {
+    if (ranked.length === 0) return [];
 
     const rows = ranked.map((r) => {
         const o = r.opportunity;
@@ -124,9 +130,43 @@ async function saveToCache(ranked: RankedOpportunity[]): Promise<void> {
         };
     });
 
-    const { error } = await supabase
+    const { data, error } = await supabase
         .from("opportunities")
-        .upsert(rows, { onConflict: "fingerprint" });
+        .upsert(rows, { onConflict: "fingerprint" })
+        .select("id, fingerprint");
 
-    if (error) console.error("Cache save error:", error.message);
+    if (error) {
+        console.error("Cache save error:", error.message);
+        return ranked;
+    }
+
+    const idByFp = new Map(data.map((d) => [d.fingerprint, d.id]));
+    const withIds = ranked.map((r) => ({
+        ...r,
+        opportunity_id: idByFp.get(r.fingerprint),
+    }));
+
+    if (userId) {
+        const historyRows = withIds
+            .filter((r) => r.opportunity_id)
+            .map((r) => ({
+                user_id: userId,
+                opportunity_id: r.opportunity_id,
+                status: "recommended",
+                match_score: r.match_score,
+                eligibility_status: r.eligibility_status,
+                eligibility_reasons: r.eligibility_reasons,
+                why_match: r.eligibility_reasons[0] ?? null,
+                recommended_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+            }));
+
+        const { error: histErr } = await supabase
+            .from("user_opportunities")
+            .upsert(historyRows, { onConflict: "user_id,opportunity_id", ignoreDuplicates: true });
+
+        if (histErr) console.error("History save error:", histErr.message);
+    }
+
+    return withIds;
 }

@@ -4,7 +4,7 @@ export interface StudentProfile {
     grade?: number | null;
     age?: number | null;
     state?: string | null;
-    minimum_gpa?: number | null; // GPA студента (не требование)
+    minimum_gpa?: number | null;
     gpa?: number | null;
 }
 

@@ -9,7 +9,7 @@ const server = new McpServer({
     version: "0.1.0",
 });
 
-// --- Returns OK to confirm the Opportunity Finder server is running ---
+// --- health_check ---
 server.registerTool(
     "health_check",
     {
@@ -33,7 +33,7 @@ server.registerTool(
     }
 );
 
-// --- Upsert student profile ---
+// --- upsert_student_profile ---
 server.registerTool(
     "upsert_student_profile",
     {
@@ -81,7 +81,7 @@ server.registerTool(
     }
 );
 
-// --- Get student profile ---
+// --- get_student_profile ---
 server.registerTool(
     "get_student_profile",
     {
@@ -123,13 +123,13 @@ server.registerTool(
     }
 );
 
-// --- Find opportunities ---
+// --- find_opportunities ---
 server.registerTool(
     "find_opportunities",
     {
         title: "Find Scholarships",
         description:
-            "Finds scholarships matching a student's profile. Loads the stored profile by user_id, searches the web, checks eligibility, and returns ranked matches. Currently scholarships only.",
+            "Finds scholarships matching a student's profile. Loads the stored profile by user_id, searches the web, checks eligibility, and returns ranked matches with an opportunity_id for each (needed to save). Currently scholarships only.",
         inputSchema: {
             user_id: z.string().describe("Unique identifier for the student."),
         },
@@ -161,15 +161,19 @@ server.registerTool(
             };
         }
 
-        const results = await findScholarships({
-            grade: profile.grade,
-            age: profile.age,
-            state: profile.state,
-            gpa: profile.preferences?.gpa ?? null,
-            interests: profile.interests ?? [],
-        });
+        const results = await findScholarships(
+            {
+                grade: profile.grade,
+                age: profile.age,
+                state: profile.state,
+                gpa: profile.preferences?.gpa ?? null,
+                interests: profile.interests ?? [],
+            },
+            user_id
+        );
 
         const matches = results.map((r) => ({
+            opportunity_id: r.opportunity_id, // needed for save_opportunity
             title: r.opportunity.title,
             organization: r.opportunity.organization,
             eligibility: r.eligibility_status,
@@ -189,6 +193,161 @@ server.registerTool(
                     text: JSON.stringify({ ok: true, count: matches.length, matches }, null, 2),
                 },
             ],
+        };
+    }
+);
+
+// --- save_opportunity ---
+server.registerTool(
+    "save_opportunity",
+    {
+        title: "Save Opportunity",
+        description:
+            "Saves an opportunity to the student's list. Use the opportunity_id from find_opportunities results.",
+        inputSchema: {
+            user_id: z.string().describe("Unique identifier for the student."),
+            opportunity_id: z.string().describe("The opportunity_id returned by find_opportunities."),
+        },
+    },
+    async ({ user_id, opportunity_id }) => {
+        const now = new Date().toISOString();
+        const { data, error } = await supabase
+            .from("user_opportunities")
+            .upsert(
+                {
+                    user_id,
+                    opportunity_id,
+                    status: "saved",
+                    saved_at: now,
+                    updated_at: now,
+                },
+                { onConflict: "user_id,opportunity_id" }
+            )
+            .select("opportunity_id, status")
+            .single();
+
+        if (error) {
+            return {
+                content: [{ type: "text", text: JSON.stringify({ ok: false, error: error.message }) }],
+                isError: true,
+            };
+        }
+
+        return {
+            content: [{ type: "text", text: JSON.stringify({ ok: true, saved: data }) }],
+        };
+    }
+);
+
+// --- update_opportunity_status ---
+const VALID_STATUSES = [
+    "recommended",
+    "saved",
+    "planning_to_apply",
+    "in_progress",
+    "applied",
+    "accepted",
+    "rejected",
+    "completed",
+    "not_interested",
+] as const;
+
+server.registerTool(
+    "update_opportunity_status",
+    {
+        title: "Update Opportunity Status",
+        description:
+            "Updates the status of an opportunity on the student's list (e.g. applied, in_progress, accepted, rejected, not_interested). Use opportunity_id from find_opportunities or my_list.",
+        inputSchema: {
+            user_id: z.string().describe("Unique identifier for the student."),
+            opportunity_id: z.string().describe("The opportunity_id."),
+            status: z.enum(VALID_STATUSES).describe("New status."),
+        },
+    },
+    async ({ user_id, opportunity_id, status }) => {
+        const now = new Date().toISOString();
+        const patch: Record<string, unknown> = {
+            user_id,
+            opportunity_id,
+            status,
+            updated_at: now,
+        };
+        if (status === "applied") patch.applied_at = now;
+        if (status === "saved") patch.saved_at = now;
+
+        const { data, error } = await supabase
+            .from("user_opportunities")
+            .upsert(patch, { onConflict: "user_id,opportunity_id" })
+            .select("opportunity_id, status")
+            .single();
+
+        if (error) {
+            return {
+                content: [{ type: "text", text: JSON.stringify({ ok: false, error: error.message }) }],
+                isError: true,
+            };
+        }
+
+        return {
+            content: [{ type: "text", text: JSON.stringify({ ok: true, updated: data }) }],
+        };
+    }
+);
+
+// --- get_my_list ---
+const DEFAULT_LIST_STATUSES = [
+    "saved",
+    "planning_to_apply",
+    "in_progress",
+    "applied",
+    "accepted",
+];
+
+server.registerTool(
+    "get_my_list",
+    {
+        title: "Get My List",
+        description:
+            "Returns the student's saved and active opportunities. By default shows saved/planning/in_progress/applied/accepted. Pass include_all=true to also show recommended/rejected/not_interested.",
+        inputSchema: {
+            user_id: z.string().describe("Unique identifier for the student."),
+            include_all: z.boolean().optional().describe("If true, include recommended/rejected/not_interested too."),
+        },
+    },
+    async ({ user_id, include_all }) => {
+        let query = supabase
+            .from("user_opportunities")
+            .select(
+                "status, match_score, applied_at, saved_at, opportunities(title, organization, deadline, award_amount, official_url, discovered_from_url)"
+            )
+            .eq("user_id", user_id)
+            .order("updated_at", { ascending: false });
+
+        if (!include_all) {
+            query = query.in("status", DEFAULT_LIST_STATUSES);
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+            return {
+                content: [{ type: "text", text: JSON.stringify({ ok: false, error: error.message }) }],
+                isError: true,
+            };
+        }
+
+        const list = (data ?? []).map((row: any) => ({
+            title: row.opportunities?.title,
+            organization: row.opportunities?.organization,
+            status: row.status,
+            deadline: row.opportunities?.deadline,
+            award_amount: row.opportunities?.award_amount,
+            applied_at: row.applied_at,
+            source: row.opportunities?.official_url ?? row.opportunities?.discovered_from_url,
+        }));
+
+        return {
+            content: [{ type: "text", text: JSON.stringify({ ok: true, count: list.length, list }, null, 2) }],
         };
     }
 );
