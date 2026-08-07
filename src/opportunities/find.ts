@@ -52,8 +52,29 @@ export async function findScholarships(
     profile: StudentProfile & { interests?: string[] },
     userId?: string
 ): Promise<RankedOpportunity[]> {
-    const queries = buildQueries(profile);
+    const seenFingerprints = await getSeenFingerprints(userId);
 
+    let ranked = await runSearchPass(buildQueries(profile), profile, seenFingerprints);
+
+    if (ranked.length < 3) {
+        const broaderQueries = buildBroaderQueries(profile);
+        const more = await runSearchPass(broaderQueries, profile, seenFingerprints);
+
+        const merged = new Map<string, RankedOpportunity>();
+        for (const r of [...ranked, ...more]) merged.set(r.fingerprint, r);
+        ranked = [...merged.values()].sort((a, b) => b.match_score - a.match_score);
+    }
+
+    const top = ranked.slice(0, 5);
+    const withIds = await saveAndRecord(top, userId);
+    return withIds;
+}
+
+async function runSearchPass(
+    queries: string[],
+    profile: StudentProfile & { interests?: string[] },
+    seenFingerprints: Set<string>
+): Promise<RankedOpportunity[]> {
     const searchResults = (
         await Promise.all(queries.map((q) => tavilySearch(q, 3).catch(() => [])))
     ).flat();
@@ -71,7 +92,9 @@ export async function findScholarships(
         if (!opp.title) continue;
 
         const fp = makeFingerprint(opp.title, opp.organization);
-        if (!fp || byFingerprint.has(fp)) continue;
+        if (!fp) continue;
+        if (seenFingerprints.has(fp)) continue;
+        if (byFingerprint.has(fp)) continue;
 
         const elig = checkEligibility(opp, profile);
         if (elig.status === "not_eligible") continue;
@@ -87,12 +110,37 @@ export async function findScholarships(
         });
     }
 
-    const ranked = [...byFingerprint.values()].sort((a, b) => b.match_score - a.match_score);
-    const top = ranked.slice(0, 5);
+    return [...byFingerprint.values()].sort((a, b) => b.match_score - a.match_score);
+}
 
-    const withIds = await saveAndRecord(top, userId);
+async function getSeenFingerprints(userId?: string): Promise<Set<string>> {
+    if (!userId) return new Set();
 
-    return withIds;
+    const { data, error } = await supabase
+        .from("user_opportunities")
+        .select("opportunities(fingerprint)")
+        .eq("user_id", userId);
+
+    if (error || !data) return new Set();
+
+    const set = new Set<string>();
+    for (const row of data as any[]) {
+        const fp = row.opportunities?.fingerprint;
+        if (fp) set.add(fp);
+    }
+    return set;
+}
+
+function buildBroaderQueries(
+    profile: StudentProfile & { interests?: string[] }
+): string[] {
+    const year = new Date().getFullYear();
+    const interest = profile.interests?.[0] ?? "STEM";
+    return [
+        `high school scholarships ${year}`,
+        `${interest} scholarships high school students ${year}`,
+        `merit scholarships high school seniors ${year}`,
+    ];
 }
 
 async function saveAndRecord(
