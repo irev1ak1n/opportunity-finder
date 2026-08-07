@@ -2,12 +2,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { supabase } from "./db.js";
+import { findScholarships } from "./opportunities/find.js";
 
 const server = new McpServer({
     name: "opportunity-finder",
     version: "0.1.0",
 });
 
+// --- Returns OK to confirm the Opportunity Finder server is running ---
 server.registerTool(
     "health_check",
     {
@@ -31,7 +33,7 @@ server.registerTool(
     }
 );
 
-// --- Creates new profile or updates current one ---
+// --- Upsert student profile ---
 server.registerTool(
     "upsert_student_profile",
     {
@@ -79,7 +81,7 @@ server.registerTool(
     }
 );
 
-// --- Gets student profile ---
+// --- Get student profile ---
 server.registerTool(
     "get_student_profile",
     {
@@ -116,6 +118,76 @@ server.registerTool(
         return {
             content: [
                 { type: "text", text: JSON.stringify({ ok: true, found: true, profile: data }) },
+            ],
+        };
+    }
+);
+
+// --- Find opportunities ---
+server.registerTool(
+    "find_opportunities",
+    {
+        title: "Find Scholarships",
+        description:
+            "Finds scholarships matching a student's profile. Loads the stored profile by user_id, searches the web, checks eligibility, and returns ranked matches. Currently scholarships only.",
+        inputSchema: {
+            user_id: z.string().describe("Unique identifier for the student."),
+        },
+    },
+    async ({ user_id }) => {
+        const { data: profile, error } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("user_id", user_id)
+            .maybeSingle();
+
+        if (error) {
+            return {
+                content: [{ type: "text", text: JSON.stringify({ ok: false, error: error.message }) }],
+                isError: true,
+            };
+        }
+        if (!profile) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify({
+                            ok: false,
+                            error: "No profile found. Ask the student for grade, location, and interests first.",
+                        }),
+                    },
+                ],
+            };
+        }
+
+        const results = await findScholarships({
+            grade: profile.grade,
+            age: profile.age,
+            state: profile.state,
+            gpa: profile.preferences?.gpa ?? null,
+            interests: profile.interests ?? [],
+        });
+
+        const matches = results.map((r) => ({
+            title: r.opportunity.title,
+            organization: r.opportunity.organization,
+            eligibility: r.eligibility_status,
+            why: r.eligibility_reasons[0],
+            award_amount: r.opportunity.award_amount,
+            deadline: r.opportunity.deadline,
+            source_type: r.opportunity.source_type,
+            source: r.opportunity.discovered_from_url,
+            official_url: r.opportunity.official_url,
+            match_score: r.match_score,
+        }));
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: JSON.stringify({ ok: true, count: matches.length, matches }, null, 2),
+                },
             ],
         };
     }
