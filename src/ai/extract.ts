@@ -18,7 +18,7 @@ const client = new OpenAI({
 
 const MODEL = "mistralai/Mistral-Nemo-Instruct-2407";
 
-const SYSTEM_PROMPT = `You extract structured scholarship data from web page text.
+const SCHOLARSHIP_PROMPT = `You extract structured scholarship data from web page text.
 A page may describe MULTIPLE scholarships (e.g. a directory) or just one.
 Return ONLY a JSON object with a single key "opportunities" whose value is an array.
 No markdown, no backticks, no explanation.
@@ -52,6 +52,41 @@ CRITICAL RULES:
 - If the page has no real scholarship, return {"opportunities": []}.
 - Output must be valid JSON and nothing else.`;
 
+const INTERNSHIP_PROMPT = `You extract structured internship data from web page text.
+A page may describe MULTIPLE internships (e.g. a directory) or just one.
+Return ONLY a JSON object with a single key "opportunities" whose value is an array.
+No markdown, no backticks, no explanation.
+
+Each array item must match this exact shape:
+{
+  "title": string,
+  "organization": string,              // the company or program offering it
+  "official_url": string | null,       // application or program page if stated, else null
+  "description": string | null,
+  "deadline": string | null,           // application deadline as ISO "YYYY-MM-DD" if clearly stated, else null
+  "location": string | null,           // city/state or "remote" if stated
+  "remote": boolean,                    // true if remote/virtual is stated
+  "eligible_states": string[],         // 2-letter codes; [] if none stated
+  "minimum_age": number | null,        // e.g. 16 if stated
+  "maximum_age": number | null,
+  "eligible_grades": number[],         // e.g. [11,12]; [] if not stated
+  "minimum_gpa": number | null,        // usually null for internships
+  "citizenship_requirement": string | null,
+  "demographic_restrictions": string[], // explicit limits only; [] if open to everyone
+  "award_amount": string | null,        // stipend/pay if stated (e.g. "paid", "$15/hr", "unpaid"), else null
+  "application_effort": string | null,
+  "requirements": string[]             // skills or materials required (resume, portfolio, etc.)
+}
+
+CRITICAL RULES:
+- NEVER invent values. If a field is not clearly stated, use null (or [] for arrays).
+- Only extract real internships, programs, or work experiences for students. Skip job postings for adults, ads, and navigation.
+- award_amount: use it for pay/stipend info (e.g. "paid", "unpaid", "$5,000 stipend") if stated, else null.
+- demographic_restrictions: capture explicit limits (gender, military, ethnicity, disability, first-generation, LGBTQ) ONLY if clearly stated as a requirement. A program name alone is not a restriction.
+- Extract up to 6 distinct internships max.
+- If the page has no real internship, return {"opportunities": []}.
+- Output must be valid JSON and nothing else.`;
+
 interface RawOpportunity {
     title?: string;
     organization?: string;
@@ -72,17 +107,21 @@ interface RawOpportunity {
     requirements?: string[];
 }
 
+export type Category = "scholarship" | "internship";
+
 export async function extractOpportunities(
     pageText: string,
-    sourceUrl: string
+    sourceUrl: string,
+    category: Category = "scholarship"
 ): Promise<Opportunity[]> {
+    const systemPrompt = category === "internship" ? INTERNSHIP_PROMPT : SCHOLARSHIP_PROMPT;
     const userContent = `Source URL: ${sourceUrl}\n\nPage text:\n${pageText.slice(0, 6000)}`;
 
     const completion = await client.chat.completions.create({
         model: MODEL,
         temperature: 0,
         messages: [
-            { role: "system", content: SYSTEM_PROMPT },
+            { role: "system", content: systemPrompt },
             { role: "user", content: userContent },
         ],
         response_format: { type: "json_object" },
@@ -106,7 +145,7 @@ export async function extractOpportunities(
         .map((it): Opportunity => ({
             title: it.title!.trim(),
             organization: (it.organization ?? "").trim(),
-            category: "scholarship",
+            category: category,
             official_url: it.official_url ?? null,
             discovered_from_url: sourceUrl,
             source_type: source.source_type,

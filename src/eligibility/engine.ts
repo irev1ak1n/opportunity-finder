@@ -123,7 +123,7 @@ export function checkEligibility(
         }
         if ((femaleOnly || maleOnly) && !gender) {
             missing = true;
-            reasons.push(`Appears gender-specific (${label}). Double-check you qualify.`);
+            reasons.push(`This scholarship looks limited to a specific gender (${label}). Make sure it applies to you.`);
         }
 
         // military / veteran family
@@ -133,7 +133,7 @@ export function checkEligibility(
                 return { status: "not_eligible", reasons: ["Limited to military or veteran families."] };
             }
             missing = true;
-            reasons.push("For military or veteran families. Double-check you qualify.");
+            reasons.push("For military or veteran families only. Double-check you qualify.");
         }
 
         // identity based (ethnicity / first-gen / disability / lgbtq): cannot verif then soft warn only

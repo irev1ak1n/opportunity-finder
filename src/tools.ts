@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { supabase } from "./db.js";
-import { findScholarships } from "./opportunities/find.js";
+import { findScholarships, type Category } from "./opportunities/find.js";
 
 type GetUserId = () => string;
 
@@ -29,7 +29,7 @@ function matchReason(opp: { title: string; description?: string | null }, intere
     const text = `${opp.title} ${opp.description ?? ""}`.toLowerCase();
     const hit = interests.find((i) => text.includes(i.toLowerCase()));
     if (hit) return `Matches your interest in ${hit}.`;
-    return "General scholarship open to your profile.";
+    return "Open to your profile.";
 }
 
 async function trackingSummary(user_id: string): Promise<{ tracked_count: number; next_deadline: string | null }> {
@@ -144,14 +144,20 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
     server.registerTool(
         "find_opportunities",
         {
-            title: "Find Scholarships",
+            title: "Find Opportunities",
             description:
-                "Finds scholarships for the student's profile and returns a ready-to-send message. " +
+                "Finds opportunities for the student's profile and returns a ready-to-send message. " +
+                "Pass category based on what the student asked for: use \"internship\" if they asked for internships, programs, or work experience; otherwise use \"scholarship\" (the default). " +
                 "Send the returned text to the user AS-IS. Do not reformat, summarize, shorten, or remove the eligibility lines.",
-            inputSchema: {},
+            inputSchema: {
+                category: z.enum(["scholarship", "internship"]).optional()
+                    .describe("What kind of opportunity to find. Default is scholarship."),
+            },
         },
-        async () => {
+        async ({ category }) => {
             const user_id = getUserId();
+            const cat: Category = category ?? "scholarship";
+
             const { data: profile, error } = await supabase
                 .from("profiles")
                 .select("*")
@@ -183,7 +189,8 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
                     gpa: profile.preferences?.gpa ?? null,
                     interests: profile.interests ?? [],
                 },
-                user_id
+                user_id,
+                cat
             );
 
             const labelMap: Record<string, string> = {
@@ -192,6 +199,8 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
                 missing_info: "? Missing info",
                 not_eligible: "✗ Not eligible",
             };
+
+            const noun = cat === "internship" ? "internships" : "scholarships";
 
             const lines: string[] = results.map((r, i) => {
                 const o = r.opportunity;
@@ -213,7 +222,7 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
 
             const display_text = lines.length
                 ? lines.join("\n\n")
-                : "No new scholarships right now — you've already seen the current matches.";
+                : `No new ${noun} right now — you've already seen the current matches.`;
 
             return {
                 content: [
@@ -264,10 +273,10 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
         {
             title: "Save Opportunity By Title",
             description:
-                "Saves an opportunity to the student's list by its title (or part of it). Use when you have the scholarship name but not its opportunity_id. " +
+                "Saves an opportunity to the student's list by its title (or part of it). Use when you have the name but not its opportunity_id. " +
                 "After saving, show the confirmation AND the tracking summary (how many opportunities are tracked and the nearest deadline) so the student sees their list is growing.",
             inputSchema: {
-                title_query: z.string().describe("The scholarship title or part of it, e.g. 'Endeavour' or 'Golden Door'."),
+                title_query: z.string().describe("The opportunity title or part of it, e.g. 'Endeavour' or 'Golden Door'."),
             },
         },
         async ({ title_query }) => {
@@ -289,7 +298,7 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
             const match = (recs as any[]).find((r) => (r.opportunities?.title ?? "").toLowerCase().includes(q));
 
             if (!match) {
-                return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: `No recommended scholarship matching "${title_query}".` }) }] };
+                return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: `No recommended opportunity matching "${title_query}".` }) }] };
             }
 
             const now = new Date().toISOString();
