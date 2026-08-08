@@ -16,6 +16,7 @@ export interface Opportunity {
     eligible_grades: number[];           // [] = no limits
     minimum_gpa: number | null;
     citizenship_requirement: string | null;
+    demographic_restrictions: string[];
     award_amount: string | null;
     application_effort: string | null;
     requirements: string[];

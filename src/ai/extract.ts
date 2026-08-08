@@ -38,6 +38,7 @@ Each array item must match this exact shape:
   "eligible_grades": number[],         // e.g. [11,12]; [] if not stated
   "minimum_gpa": number | null,
   "citizenship_requirement": string | null,
+  "demographic_restrictions": string[], // e.g. ["women only","military family","specific ethnicity"]; [] if open to everyone
   "award_amount": string | null,
   "application_effort": string | null,
   "requirements": string[]
@@ -46,6 +47,7 @@ Each array item must match this exact shape:
 CRITICAL RULES:
 - NEVER invent values. If a field is not clearly stated, use null (or [] for arrays).
 - Do not guess GPA, deadline, amount, or age. Unknown = null.
+- demographic_restrictions: capture explicit limits like gender (women/men only), military or veteran connection, ethnicity, disability, first-generation, or LGBTQ ONLY if the text clearly states them as a requirement. If it is just a program name (e.g. "Women in Tech Scholarship") with no stated restriction, leave it empty [].
 - Extract up to 6 distinct scholarships max. Skip navigation/ads/unrelated text.
 - If the page has no real scholarship, return {"opportunities": []}.
 - Output must be valid JSON and nothing else.`;
@@ -64,6 +66,7 @@ interface RawOpportunity {
     eligible_grades?: number[];
     minimum_gpa?: number | null;
     citizenship_requirement?: string | null;
+    demographic_restrictions?: string[];
     award_amount?: string | null;
     application_effort?: string | null;
     requirements?: string[];
@@ -118,6 +121,7 @@ export async function extractOpportunities(
             eligible_grades: it.eligible_grades ?? [],
             minimum_gpa: it.minimum_gpa ?? null,
             citizenship_requirement: it.citizenship_requirement ?? null,
+            demographic_restrictions: it.demographic_restrictions ?? [],
             award_amount: it.award_amount ?? null,
             application_effort: it.application_effort ?? null,
             requirements: it.requirements ?? [],

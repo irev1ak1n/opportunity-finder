@@ -6,6 +6,8 @@ export interface StudentProfile {
     state?: string | null;
     minimum_gpa?: number | null;
     gpa?: number | null;
+    gender?: string | null;          // "male" | "female" | null
+    military_family?: boolean | null;
 }
 
 export type EligibilityStatus =
@@ -19,7 +21,7 @@ export interface EligibilityResult {
     reasons: string[];
 }
 
-// Is the deasline expired?
+// Is the deadline expired?
 export function isExpired(opp: Opportunity, now = new Date()): boolean {
     if (!opp.deadline)
         return false; // no date — not considered expired
@@ -99,6 +101,51 @@ export function checkEligibility(
     if (opp.citizenship_requirement) {
         missing = true;
         reasons.push(`Citizenship requirement (${opp.citizenship_requirement}) could not be confirmed.`);
+    }
+
+    // --- demographic restrictions (variant C: hard exclude / soft warn / neutral) ---
+    if (opp.demographic_restrictions && opp.demographic_restrictions.length > 0) {
+        const restr = opp.demographic_restrictions.map((r) => r.toLowerCase());
+        const mentions = (keys: string[]) =>
+            restr.some((r) => keys.some((k) => r.includes(k)));
+        const label = opp.demographic_restrictions.join(", ");
+
+        // gender
+        const femaleOnly = mentions(["women", "woman", "female", "girls"]);
+        const maleOnly = mentions(["men only", "male only", "boys"]);
+        const gender = student.gender ? student.gender.toLowerCase() : null;
+
+        if (femaleOnly && gender === "male") {
+            return { status: "not_eligible", reasons: ["Limited to women."] };
+        }
+        if (maleOnly && gender === "female") {
+            return { status: "not_eligible", reasons: ["Limited to men."] };
+        }
+        if ((femaleOnly || maleOnly) && !gender) {
+            missing = true;
+            reasons.push(`Appears gender-specific (${label}). Double-check you qualify.`);
+        }
+
+        // military / veteran family
+        const militaryOnly = mentions(["military", "veteran", "armed forces", "service member"]);
+        if (militaryOnly) {
+            if (student.military_family === false) {
+                return { status: "not_eligible", reasons: ["Limited to military or veteran families."] };
+            }
+            missing = true;
+            reasons.push("For military or veteran families. Double-check you qualify.");
+        }
+
+        // identity based (ethnicity / first-gen / disability / lgbtq): cannot verif then soft warn only
+        const identityBased = mentions([
+            "ethnicity", "hispanic", "latino", "black", "african american",
+            "asian", "native", "indigenous", "first-generation", "first generation",
+            "disability", "lgbtq",
+        ]);
+        if (identityBased) {
+            missing = true;
+            reasons.push(`Has a specific eligibility group (${label}). Double-check you qualify.`);
+        }
     }
 
     if (missing) {

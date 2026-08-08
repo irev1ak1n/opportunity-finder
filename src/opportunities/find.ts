@@ -122,6 +122,7 @@ async function searchCache(
             eligible_grades: row.eligible_grades ?? [],
             minimum_gpa: row.minimum_gpa,
             citizenship_requirement: row.citizenship_requirement,
+            demographic_restrictions: row.demographic_restrictions ?? [],
             award_amount: row.award_amount,
             application_effort: row.application_effort,
             requirements: row.requirements ?? [],
