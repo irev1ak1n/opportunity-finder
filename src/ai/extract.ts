@@ -87,6 +87,75 @@ CRITICAL RULES:
 - If the page has no real internship, return {"opportunities": []}.
 - Output must be valid JSON and nothing else.`;
 
+const VOLUNTEERING_PROMPT = `You extract structured volunteer opportunity data from web page text.
+A page may describe MULTIPLE volunteer opportunities or just one.
+Return ONLY a JSON object with a single key "opportunities" whose value is an array.
+No markdown, no backticks, no explanation.
+
+Each array item must match this exact shape:
+{
+  "title": string,
+  "organization": string,
+  "official_url": string | null,
+  "description": string | null,
+  "deadline": string | null,
+  "location": string | null,
+  "remote": boolean,
+  "eligible_states": string[],
+  "minimum_age": number | null,
+  "maximum_age": number | null,
+  "eligible_grades": number[],
+  "minimum_gpa": number | null,
+  "citizenship_requirement": string | null,
+  "demographic_restrictions": string[],
+  "award_amount": string | null,
+  "application_effort": string | null,
+  "requirements": string[]
+}
+
+CRITICAL RULES:
+- NEVER invent values. Unknown = null (or [] for arrays).
+- Only extract real volunteer opportunities for students. Skip ads and navigation.
+- award_amount is usually null (volunteering is unpaid). Put time commitment in requirements.
+- demographic_restrictions: explicit limits only.
+- Extract up to 6 max. If none, return {"opportunities": []}.
+- Output must be valid JSON and nothing else.`;
+
+const PROGRAM_PROMPT = `You extract structured student program or competition data from web page text.
+This includes summer programs, pre-college programs, enrichment programs, contests, and competitions.
+A page may describe MULTIPLE of these or just one.
+Return ONLY a JSON object with a single key "opportunities" whose value is an array.
+No markdown, no backticks, no explanation.
+
+Each array item must match this exact shape:
+{
+  "title": string,
+  "organization": string,
+  "official_url": string | null,
+  "description": string | null,
+  "deadline": string | null,           // application deadline if stated
+  "location": string | null,
+  "remote": boolean,
+  "eligible_states": string[],
+  "minimum_age": number | null,
+  "maximum_age": number | null,
+  "eligible_grades": number[],
+  "minimum_gpa": number | null,
+  "citizenship_requirement": string | null,
+  "demographic_restrictions": string[],
+  "award_amount": string | null,        // cost, stipend, or prize if stated, else null
+  "application_effort": string | null,
+  "requirements": string[]
+}
+
+CRITICAL RULES:
+- NEVER invent values. Unknown = null (or [] for arrays).
+- Only extract real programs or competitions for students. Skip ads and navigation.
+- award_amount: use for cost, stipend, or prize money if stated, else null.
+- demographic_restrictions: explicit limits only.
+- Extract up to 6 max. If none, return {"opportunities": []}.
+- Output must be valid JSON and nothing else.`;
+
 interface RawOpportunity {
     title?: string;
     organization?: string;
@@ -107,14 +176,21 @@ interface RawOpportunity {
     requirements?: string[];
 }
 
-export type Category = "scholarship" | "internship";
+export type Category = "scholarship" | "internship" | "volunteering" | "program" | "competition";
 
 export async function extractOpportunities(
     pageText: string,
     sourceUrl: string,
     category: Category = "scholarship"
 ): Promise<Opportunity[]> {
-    const systemPrompt = category === "internship" ? INTERNSHIP_PROMPT : SCHOLARSHIP_PROMPT;
+    let systemPrompt: string;
+    switch (category) {
+        case "internship": systemPrompt = INTERNSHIP_PROMPT; break;
+        case "volunteering": systemPrompt = VOLUNTEERING_PROMPT; break;
+        case "program":
+        case "competition": systemPrompt = PROGRAM_PROMPT; break;
+        default: systemPrompt = SCHOLARSHIP_PROMPT;
+    }
     const userContent = `Source URL: ${sourceUrl}\n\nPage text:\n${pageText.slice(0, 6000)}`;
 
     const completion = await client.chat.completions.create({

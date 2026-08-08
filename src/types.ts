@@ -4,7 +4,7 @@ export interface Opportunity {
     category: string;                    // as if now always "scholarship"
     official_url: string | null;
     discovered_from_url: string;         // where was found  (Tavily)
-    source_type: "official" | "aggregator" | "unknown";
+    source_type: "official" | "trusted_directory" | "specialized_directory" | "aggregator" | "job_board" | "unknown";
     source_confidence: "high" | "medium" | "low";
     description: string | null;
     deadline: string | null;             // ISO "YYYY-MM-DD" or null

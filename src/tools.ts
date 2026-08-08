@@ -147,10 +147,10 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
             title: "Find Opportunities",
             description:
                 "Finds opportunities for the student's profile and returns a ready-to-send message. " +
-                "Pass category based on what the student asked for: use \"internship\" if they asked for internships, programs, or work experience; otherwise use \"scholarship\" (the default). " +
+                "Pass category based on what the student asked for: \"internship\" for internships or work experience; \"volunteering\" for volunteer or community service; \"program\" for summer or pre-college programs; \"competition\" for contests or competitions; otherwise \"scholarship\" (the default). " +
                 "Send the returned text to the user AS-IS. Do not reformat, summarize, shorten, or remove the eligibility lines.",
             inputSchema: {
-                category: z.enum(["scholarship", "internship"]).optional()
+                category: z.enum(["scholarship", "internship", "volunteering", "program", "competition"]).optional()
                     .describe("What kind of opportunity to find. Default is scholarship."),
             },
         },
@@ -200,7 +200,14 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
                 not_eligible: "✗ Not eligible",
             };
 
-            const noun = cat === "internship" ? "internships" : "scholarships";
+            const nounMap: Record<string, string> = {
+                scholarship: "scholarships",
+                internship: "internships",
+                volunteering: "volunteer opportunities",
+                program: "programs",
+                competition: "competitions",
+            };
+            const noun = nounMap[cat] ?? "opportunities";
 
             const lines: string[] = results.map((r, i) => {
                 const o = r.opportunity;

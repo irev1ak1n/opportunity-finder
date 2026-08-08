@@ -2,11 +2,11 @@ import { tavilySearch } from "../search/tavily.js";
 import { extractOpportunities } from "../ai/extract.js";
 import { checkEligibility, isExpired, type StudentProfile, type EligibilityStatus } from "../eligibility/engine.js";
 import { makeFingerprint } from "../utils/fingerprint.js";
+import { preferredDomains, sourceRankBonus } from "../utils/source.js";
 import { supabase } from "../db.js";
 import type { Opportunity } from "../types.js";
 
-import type { Category } from "../ai/extract.js";
-export type { Category };
+export type Category = "scholarship" | "internship" | "volunteering" | "program" | "competition";
 
 export interface RankedOpportunity {
     opportunity: Opportunity;
@@ -18,28 +18,60 @@ export interface RankedOpportunity {
 }
 
 function buildQueries(
-    profile: StudentProfile & { interests?: string[] },
+    profile: StudentProfile & { interests?: string[]; city?: string | null },
     category: Category
 ): string[] {
     const year = new Date().getFullYear();
     const state = profile.state ?? "";
+    const city = profile.city ?? "";
     const interest = profile.interests?.[0] ?? "";
     const gradeWord = profile.grade === 12 ? "high school seniors" : "high school students";
 
+    let base: string[];
     if (category === "internship") {
-        return [
-            `${interest} internships ${gradeWord} ${year}`.trim(),
-            `summer internships ${gradeWord} ${state} ${year}`.trim(),
-            `${interest} internships teens high school ${year}`.trim(),
-        ].filter((q) => q.length > 10);
+        base = [
+            `${interest} internships for ${gradeWord} ${city} ${state} ${year}`,
+            `summer internships ${gradeWord} ${state} ${year}`,
+            `${interest} internships teens high school ${year}`,
+        ];
+    } else if (category === "volunteering") {
+        base = [
+            `teen volunteer opportunities ${city} ${state} ${year}`,
+            `${interest} volunteer opportunities high school students ${state}`,
+            `community service opportunities ${gradeWord} ${state}`,
+        ];
+    } else if (category === "program") {
+        base = [
+            `${interest} summer programs for ${gradeWord} ${state} ${year}`,
+            `${interest} programs high school students ${year}`,
+            `pre-college programs ${gradeWord} ${year}`,
+        ];
+    } else if (category === "competition") {
+        base = [
+            `${interest} competitions for high school students ${year}`,
+            `${interest} contests ${gradeWord} ${year}`,
+            `national competitions high school students ${year}`,
+        ];
+    } else {
+        // scholarship (default)
+        base = [
+            `${interest} scholarships for ${gradeWord} ${state} ${year}`,
+            `scholarships ${gradeWord} ${state} ${year}`,
+            `${interest} scholarships ${state} high school ${year}`,
+        ];
     }
 
-    // scholarship (default)
-    return [
-        `${interest} scholarships ${gradeWord} ${year}`.trim(),
-        `scholarships ${gradeWord} ${state} ${year}`.trim(),
-        `${interest} scholarships ${state} high school ${year}`.trim(),
-    ].filter((q) => q.length > 10);
+    // targeted site: searches against a few preferred discovery domains
+    // (adds discovery breadth; does NOT restrict — broad queries above still run)
+    const domains = preferredDomains(category).slice(0, 3);
+    const targeted = domains.map((d) => {
+        const q = interest ? `${interest} ${category === "scholarship" ? "scholarships" : category}` : category;
+        return `site:${d} ${q} high school ${year}`;
+    });
+
+    return [...base, ...targeted]
+        .map((q) => q.replace(/\s+/g, " ").trim())
+        .filter((q) => q.length > 10);
 }
 
 function buildBroaderQueries(
@@ -54,6 +86,27 @@ function buildBroaderQueries(
             `high school internships ${year}`,
             `${interest} internships students ${year}`,
             `summer programs internships teens ${year}`,
+        ];
+    }
+    if (category === "volunteering") {
+        return [
+            `high school volunteer opportunities ${year}`,
+            `teen community service ${year}`,
+            `${interest} volunteering students ${year}`,
+        ];
+    }
+    if (category === "program") {
+        return [
+            `high school summer programs ${year}`,
+            `${interest} pre-college programs ${year}`,
+            `enrichment programs high school students ${year}`,
+        ];
+    }
+    if (category === "competition") {
+        return [
+            `high school competitions ${year}`,
+            `${interest} contests students ${year}`,
+            `academic competitions high school ${year}`,
         ];
     }
 
@@ -77,8 +130,8 @@ function scoreOpportunity(
     const text = `${opp.title} ${opp.description ?? ""}`.toLowerCase();
     if (profile.interests?.some((i) => text.includes(i.toLowerCase()))) score += 20;
 
-    if (opp.source_confidence === "high") score += 5;
-    else if (opp.source_confidence === "medium") score += 3;
+    // source quality bonus (official > trusted > specialized > aggregator > job_board > unknown)
+    score += sourceRankBonus(opp.source_type);
 
     if (opp.deadline) score += 5;
 
@@ -86,7 +139,7 @@ function scoreOpportunity(
 }
 
 export async function findScholarships(
-    profile: StudentProfile & { interests?: string[] },
+    profile: StudentProfile & { interests?: string[]; city?: string | null },
     userId?: string,
     category: Category = "scholarship"
 ): Promise<RankedOpportunity[]> {
@@ -173,12 +226,16 @@ async function runSearchPass(
         const fp = makeFingerprint(opp.title, opp.organization);
         if (!fp) continue;
         if (seenFingerprints.has(fp)) continue;
-        if (byFingerprint.has(fp)) continue;
+
+        const existing = byFingerprint.get(fp);
 
         const elig = checkEligibility(opp, profile);
         if (elig.status === "not_eligible") continue;
 
         const score = scoreOpportunity(opp, elig.status, profile);
+
+        // prefer the higher-quality source when the same opportunity is found twice
+        if (existing && existing.match_score >= score) continue;
 
         byFingerprint.set(fp, {
             opportunity: opp,
