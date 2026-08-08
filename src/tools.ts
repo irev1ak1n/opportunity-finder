@@ -25,6 +25,31 @@ const DEFAULT_LIST_STATUSES = [
     "accepted",
 ];
 
+function matchReason(opp: { title: string; description?: string | null }, interests: string[]): string {
+    const text = `${opp.title} ${opp.description ?? ""}`.toLowerCase();
+    const hit = interests.find((i) => text.includes(i.toLowerCase()));
+    if (hit) return `Matches your interest in ${hit}.`;
+    return "General scholarship open to your profile.";
+}
+
+async function trackingSummary(user_id: string): Promise<{ tracked_count: number; next_deadline: string | null }> {
+    const active = ["saved", "planning_to_apply", "in_progress", "applied", "accepted"];
+    const { data } = await supabase
+        .from("user_opportunities")
+        .select("opportunities(deadline)")
+        .eq("user_id", user_id)
+        .in("status", active);
+
+    const rows = (data ?? []) as any[];
+    const deadlines = rows
+        .map((r) => r.opportunities?.deadline)
+        .filter((d): d is string => !!d)
+        .filter((d) => new Date(d) >= new Date())
+        .sort();
+
+    return { tracked_count: rows.length, next_deadline: deadlines[0] ?? null };
+}
+
 export function registerTools(server: McpServer, getUserId: GetUserId) {
     server.registerTool(
         "health_check",
@@ -121,7 +146,12 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
         {
             title: "Find Scholarships",
             description:
-                "Finds scholarships matching the current student's stored profile. Returns ranked matches, each with an opportunity_id needed to save. Excludes previously seen ones. Currently scholarships only.",
+                "Finds scholarships matching the student's stored profile. Returns ranked matches. " +
+                "IMPORTANT when presenting to the user: for EACH scholarship you MUST show three things prominently — " +
+                "(1) the eligibility label EXACTLY as returned (Eligible / Likely eligible / Missing information — never upgrade 'Likely eligible' to 'Eligible'), " +
+                "(2) the 'why you qualify' reasons, and (3) why it matches their interests. " +
+                "This eligibility check is the product's key feature — always make it visible, do not omit it. " +
+                "Each match includes an opportunity_id used for saving.",
             inputSchema: {},
         },
         async () => {
@@ -163,18 +193,24 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
                 user_id
             );
 
+            const labelMap: Record<string, string> = {
+                eligible: "Eligible",
+                likely_eligible: "Likely eligible",
+                missing_info: "Missing information",
+                not_eligible: "Not eligible",
+            };
+
             const matches = results.map((r) => ({
                 opportunity_id: r.opportunity_id,
                 title: r.opportunity.title,
                 organization: r.opportunity.organization,
-                eligibility: r.eligibility_status,
-                why: r.eligibility_reasons[0],
+                eligibility_label: labelMap[r.eligibility_status] ?? r.eligibility_status,
+                why_you_qualify: r.eligibility_reasons,
+                why_it_matches: matchReason(r.opportunity, profile.interests ?? []),
                 award_amount: r.opportunity.award_amount,
                 deadline: r.opportunity.deadline,
-                source_type: r.opportunity.source_type,
-                source: r.opportunity.discovered_from_url,
-                official_url: r.opportunity.official_url,
-                match_score: r.match_score,
+                source: r.opportunity.official_url ?? r.opportunity.discovered_from_url,
+                source_confidence: r.opportunity.source_confidence,
             }));
 
             return {
@@ -213,7 +249,8 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
                     isError: true,
                 };
             }
-            return { content: [{ type: "text", text: JSON.stringify({ ok: true, saved: data }) }] };
+            const summary = await trackingSummary(user_id);
+            return { content: [{ type: "text", text: JSON.stringify({ ok: true, saved: data, tracking: summary }) }] };
         }
     );
 
@@ -222,7 +259,8 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
         {
             title: "Save Opportunity By Title",
             description:
-                "Saves an opportunity to the student's list by its title (or part of it). Use this when you have the scholarship name but not its opportunity_id. Matches against the student's recently recommended opportunities.",
+                "Saves an opportunity to the student's list by its title (or part of it). Use when you have the scholarship name but not its opportunity_id. " +
+                "After saving, show the confirmation AND the tracking summary (how many opportunities are tracked and the nearest deadline) so the student sees their list is growing.",
             inputSchema: {
                 title_query: z.string().describe("The scholarship title or part of it, e.g. 'Endeavour' or 'Golden Door'."),
             },
@@ -230,7 +268,7 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
         async ({ title_query }) => {
             const user_id = getUserId();
 
-            const { data: recs, error: recErr } = await supabase
+            const { data: recs } = await supabase
                 .from("user_opportunities")
                 .select("opportunity_id, opportunities(title)")
                 .eq("user_id", user_id)
@@ -238,21 +276,15 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
                 .order("recommended_at", { ascending: false })
                 .limit(50);
 
-            if (recErr || !recs || recs.length === 0) {
-                return {
-                    content: [{ type: "text", text: JSON.stringify({ ok: false, error: "No recent recommendations found. Run a search first." }) }],
-                };
+            if (!recs || recs.length === 0) {
+                return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: "No recent recommendations found. Run a search first." }) }] };
             }
 
             const q = title_query.toLowerCase();
-            const match = (recs as any[]).find((r) =>
-                (r.opportunities?.title ?? "").toLowerCase().includes(q)
-            );
+            const match = (recs as any[]).find((r) => (r.opportunities?.title ?? "").toLowerCase().includes(q));
 
             if (!match) {
-                return {
-                    content: [{ type: "text", text: JSON.stringify({ ok: false, error: `No recommended scholarship matching "${title_query}".` }) }],
-                };
+                return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: `No recommended scholarship matching "${title_query}".` }) }] };
             }
 
             const now = new Date().toISOString();
@@ -263,14 +295,13 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
                 .eq("opportunity_id", match.opportunity_id);
 
             if (error) {
-                return {
-                    content: [{ type: "text", text: JSON.stringify({ ok: false, error: error.message }) }],
-                    isError: true,
-                };
+                return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: error.message }) }], isError: true };
             }
 
+            const summary = await trackingSummary(user_id);
+
             return {
-                content: [{ type: "text", text: JSON.stringify({ ok: true, saved: match.opportunities?.title }) }],
+                content: [{ type: "text", text: JSON.stringify({ ok: true, saved: match.opportunities?.title, tracking: summary }) }],
             };
         }
     );
@@ -305,7 +336,8 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
                     isError: true,
                 };
             }
-            return { content: [{ type: "text", text: JSON.stringify({ ok: true, updated: data }) }] };
+            const summary = await trackingSummary(user_id);
+            return { content: [{ type: "text", text: JSON.stringify({ ok: true, updated: data, tracking: summary }) }] };
         }
     );
 
