@@ -6,18 +6,16 @@ async function main() {
         age: 17,
         state: "NC",
         gpa: 3.8,
-        interests: ["computer science", "aerospace engineering"],
+        interests: ["computer science"],
     };
 
-    console.log("Finding scholarships for profile:", profile, "\n");
-    const results = await findScholarships(profile);
+    console.time("find");
+    const results = await findScholarships(profile, "cache_test_user");
+    console.timeEnd("find");
 
-    console.log(`\n=== TOP ${results.length} MATCHES ===\n`);
+    console.log(`\nReturned ${results.length} matches:`);
     for (const r of results) {
-        console.log(`[${r.match_score}] ${r.opportunity.title}`);
-        console.log(`   ${r.eligibility_status} — ${r.eligibility_reasons[0]}`);
-        console.log(`   ${r.opportunity.award_amount ?? "?"} | ${r.opportunity.source_type} | deadline: ${r.opportunity.deadline ?? "none"}`);
-        console.log();
+        console.log(`[${r.match_score}] ${r.opportunity.title} — ${r.eligibility_status}`);
     }
 }
 

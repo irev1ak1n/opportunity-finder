@@ -52,22 +52,96 @@ export async function findScholarships(
     profile: StudentProfile & { interests?: string[] },
     userId?: string
 ): Promise<RankedOpportunity[]> {
+    const TARGET = 5;
     const seenFingerprints = await getSeenFingerprints(userId);
 
-    let ranked = await runSearchPass(buildQueries(profile), profile, seenFingerprints);
+    const cached = await searchCache(profile, seenFingerprints);
+    console.error(`Cache returned ${cached.length} matches`);
 
-    if (ranked.length < 3) {
-        const broaderQueries = buildBroaderQueries(profile);
-        const more = await runSearchPass(broaderQueries, profile, seenFingerprints);
+    let pool = new Map<string, RankedOpportunity>();
+    for (const r of cached) pool.set(r.fingerprint, r);
 
-        const merged = new Map<string, RankedOpportunity>();
-        for (const r of [...ranked, ...more]) merged.set(r.fingerprint, r);
-        ranked = [...merged.values()].sort((a, b) => b.match_score - a.match_score);
+    if (pool.size < TARGET) {
+        const fromWeb = await runSearchPass(buildQueries(profile), profile, seenFingerprints);
+        for (const r of fromWeb) {
+            if (!pool.has(r.fingerprint)) pool.set(r.fingerprint, r);
+        }
+
+        if (pool.size < 3) {
+            const broader = await runSearchPass(buildBroaderQueries(profile), profile, seenFingerprints);
+            for (const r of broader) {
+                if (!pool.has(r.fingerprint)) pool.set(r.fingerprint, r);
+            }
+        }
     }
 
-    const top = ranked.slice(0, 5);
+    const ranked = [...pool.values()].sort((a, b) => b.match_score - a.match_score);
+    const top = ranked.slice(0, TARGET);
+
     const withIds = await saveAndRecord(top, userId);
     return withIds;
+}
+
+async function searchCache(
+    profile: StudentProfile & { interests?: string[] },
+    seenFingerprints: Set<string>
+): Promise<RankedOpportunity[]> {
+    const freshCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const today = new Date().toISOString().slice(0, 10);
+
+    const { data, error } = await supabase
+        .from("opportunities")
+        .select("*")
+        .eq("category", "scholarship")
+        .gte("last_checked_at", freshCutoff)
+        .or(`deadline.is.null,deadline.gte.${today}`)
+        .limit(100);
+
+    if (error || !data) return [];
+
+    const results: RankedOpportunity[] = [];
+
+    for (const row of data as any[]) {
+        const opp: Opportunity = {
+            title: row.title,
+            organization: row.organization ?? "",
+            category: row.category,
+            official_url: row.official_url,
+            discovered_from_url: row.discovered_from_url ?? "",
+            source_type: row.source_type,
+            source_confidence: row.source_confidence,
+            description: row.description,
+            deadline: row.deadline,
+            location: row.location,
+            remote: row.remote ?? false,
+            eligible_states: row.eligible_states ?? [],
+            minimum_age: row.minimum_age,
+            maximum_age: row.maximum_age,
+            eligible_grades: row.eligible_grades ?? [],
+            minimum_gpa: row.minimum_gpa,
+            citizenship_requirement: row.citizenship_requirement,
+            award_amount: row.award_amount,
+            application_effort: row.application_effort,
+            requirements: row.requirements ?? [],
+        };
+
+        const fp = row.fingerprint ?? makeFingerprint(opp.title, opp.organization);
+        if (!fp || seenFingerprints.has(fp)) continue;
+
+        const elig = checkEligibility(opp, profile);
+        if (elig.status === "not_eligible") continue;
+
+        results.push({
+            opportunity: opp,
+            fingerprint: fp,
+            opportunity_id: row.id,
+            eligibility_status: elig.status,
+            eligibility_reasons: elig.reasons,
+            match_score: scoreOpportunity(opp, elig.status, profile),
+        });
+    }
+
+    return results.sort((a, b) => b.match_score - a.match_score);
 }
 
 async function runSearchPass(
