@@ -53,6 +53,7 @@ export async function findScholarships(
     userId?: string
 ): Promise<RankedOpportunity[]> {
     const TARGET = 5;
+    const WEB_BUDGET_MS = 12000;
     const seenFingerprints = await getSeenFingerprints(userId);
 
     const cached = await searchCache(profile, seenFingerprints);
@@ -61,17 +62,19 @@ export async function findScholarships(
     for (const r of cached) pool.set(r.fingerprint, r);
 
     if (pool.size < TARGET) {
-        const fromWeb = await runSearchPass(buildQueries(profile), profile, seenFingerprints);
+        const webPromise = runSearchPass(buildQueries(profile), profile, seenFingerprints);
+        const timeout = new Promise<RankedOpportunity[]>((resolve) =>
+            setTimeout(() => resolve([]), WEB_BUDGET_MS)
+        );
+        const fromWeb = await Promise.race([webPromise, timeout]);
+
         for (const r of fromWeb) {
             if (!pool.has(r.fingerprint)) pool.set(r.fingerprint, r);
         }
 
-        if (pool.size < 3) {
-            const broader = await runSearchPass(buildBroaderQueries(profile), profile, seenFingerprints);
-            for (const r of broader) {
-                if (!pool.has(r.fingerprint)) pool.set(r.fingerprint, r);
-            }
-        }
+        webPromise.then((full) => {
+            saveAndRecord(full.slice(0, 10), userId).catch(() => {});
+        }).catch(() => {});
     }
 
     const ranked = [...pool.values()].sort((a, b) => b.match_score - a.match_score);
