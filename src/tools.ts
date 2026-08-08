@@ -218,6 +218,64 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
     );
 
     server.registerTool(
+        "save_opportunity_by_title",
+        {
+            title: "Save Opportunity By Title",
+            description:
+                "Saves an opportunity to the student's list by its title (or part of it). Use this when you have the scholarship name but not its opportunity_id. Matches against the student's recently recommended opportunities.",
+            inputSchema: {
+                title_query: z.string().describe("The scholarship title or part of it, e.g. 'Endeavour' or 'Golden Door'."),
+            },
+        },
+        async ({ title_query }) => {
+            const user_id = getUserId();
+
+            const { data: recs, error: recErr } = await supabase
+                .from("user_opportunities")
+                .select("opportunity_id, opportunities(title)")
+                .eq("user_id", user_id)
+                .eq("status", "recommended")
+                .order("recommended_at", { ascending: false })
+                .limit(50);
+
+            if (recErr || !recs || recs.length === 0) {
+                return {
+                    content: [{ type: "text", text: JSON.stringify({ ok: false, error: "No recent recommendations found. Run a search first." }) }],
+                };
+            }
+
+            const q = title_query.toLowerCase();
+            const match = (recs as any[]).find((r) =>
+                (r.opportunities?.title ?? "").toLowerCase().includes(q)
+            );
+
+            if (!match) {
+                return {
+                    content: [{ type: "text", text: JSON.stringify({ ok: false, error: `No recommended scholarship matching "${title_query}".` }) }],
+                };
+            }
+
+            const now = new Date().toISOString();
+            const { error } = await supabase
+                .from("user_opportunities")
+                .update({ status: "saved", saved_at: now, updated_at: now })
+                .eq("user_id", user_id)
+                .eq("opportunity_id", match.opportunity_id);
+
+            if (error) {
+                return {
+                    content: [{ type: "text", text: JSON.stringify({ ok: false, error: error.message }) }],
+                    isError: true,
+                };
+            }
+
+            return {
+                content: [{ type: "text", text: JSON.stringify({ ok: true, saved: match.opportunities?.title }) }],
+            };
+        }
+    );
+
+    server.registerTool(
         "update_opportunity_status",
         {
             title: "Update Opportunity Status",
