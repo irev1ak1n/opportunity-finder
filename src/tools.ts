@@ -146,12 +146,10 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
         {
             title: "Find Scholarships",
             description:
-                "Finds scholarships matching the student's stored profile. Returns ranked matches. " +
-                "IMPORTANT when presenting to the user: for EACH scholarship you MUST show three things prominently — " +
-                "(1) the eligibility label EXACTLY as returned (Eligible / Likely eligible / Missing information — never upgrade 'Likely eligible' to 'Eligible'), " +
-                "(2) the 'why you qualify' reasons, and (3) why it matches their interests. " +
-                "This eligibility check is the product's key feature — always make it visible, do not omit it. " +
-                "Each match includes an opportunity_id used for saving.",
+                "Finds scholarships matching the student's stored profile. " +
+                "Returns a pre-formatted 'display_text' field — send that text to the user EXACTLY as written, " +
+                "preserving the eligibility line and 'Why you qualify' for each scholarship. Do not summarize or strip these. " +
+                "Each match also has an opportunity_id for saving.",
             inputSchema: {},
         },
         async () => {
@@ -194,28 +192,43 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
             );
 
             const labelMap: Record<string, string> = {
-                eligible: "Eligible",
-                likely_eligible: "Likely eligible",
-                missing_info: "Missing information",
-                not_eligible: "Not eligible",
+                eligible: "✓ Eligible",
+                likely_eligible: "◐ Likely eligible",
+                missing_info: "? Missing info",
+                not_eligible: "✗ Not eligible",
             };
 
-            const matches = results.map((r) => ({
-                opportunity_id: r.opportunity_id,
-                title: r.opportunity.title,
-                organization: r.opportunity.organization,
-                eligibility_label: labelMap[r.eligibility_status] ?? r.eligibility_status,
-                why_you_qualify: r.eligibility_reasons,
-                why_it_matches: matchReason(r.opportunity, profile.interests ?? []),
-                award_amount: r.opportunity.award_amount,
-                deadline: r.opportunity.deadline,
-                source: r.opportunity.official_url ?? r.opportunity.discovered_from_url,
-                source_confidence: r.opportunity.source_confidence,
-            }));
+            const lines: string[] = [];
+            const matches = results.map((r, i) => {
+                const o = r.opportunity;
+                const label = labelMap[r.eligibility_status] ?? r.eligibility_status;
+                const why = r.eligibility_reasons.slice(0, 3).join(" · ");
+                const match = matchReason(o, profile.interests ?? []);
+                const amount = o.award_amount ? ` — ${o.award_amount}` : "";
+                const deadline = o.deadline ? ` (deadline ${o.deadline})` : "";
+                const src = o.official_url ?? o.discovered_from_url ?? "";
+
+                lines.push(
+                    `${i + 1}. ${o.title}${amount}${deadline}\n` +
+                    `   ${label}\n` +
+                    `   Why you qualify: ${why}\n` +
+                    `   ${match}\n` +
+                    `   Source: ${src}`
+                );
+
+                return { opportunity_id: r.opportunity_id, title: o.title };
+            });
+
+            const display_text = lines.length
+                ? lines.join("\n\n")
+                : "No new scholarships right now — you've already seen the current matches.";
 
             return {
                 content: [
-                    { type: "text", text: JSON.stringify({ ok: true, count: matches.length, matches }, null, 2) },
+                    {
+                        type: "text",
+                        text: JSON.stringify({ ok: true, count: matches.length, display_text, matches }, null, 2),
+                    },
                 ],
             };
         }
