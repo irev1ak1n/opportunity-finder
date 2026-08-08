@@ -6,7 +6,7 @@ async function main() {
         age: 17,
         state: "NC",
         gpa: 3.8,
-        interests: ["computer science"],
+        interests: ["marine biology"],
     };
 
     console.time("find");

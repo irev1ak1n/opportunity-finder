@@ -56,7 +56,6 @@ export async function findScholarships(
     const seenFingerprints = await getSeenFingerprints(userId);
 
     const cached = await searchCache(profile, seenFingerprints);
-    console.error(`Cache returned ${cached.length} matches`);
 
     let pool = new Map<string, RankedOpportunity>();
     for (const r of cached) pool.set(r.fingerprint, r);
@@ -149,15 +148,34 @@ async function runSearchPass(
     profile: StudentProfile & { interests?: string[] },
     seenFingerprints: Set<string>
 ): Promise<RankedOpportunity[]> {
+    const t0 = Date.now();
+
     const searchResults = (
         await Promise.all(queries.map((q) => tavilySearch(q, 3).catch(() => [])))
     ).flat();
+    console.error(`[PERF] tavily: ${Date.now() - t0}ms (${searchResults.length} results)`);
 
+    const urls = [...new Set(searchResults.map((r) => r.url))];
+    const freshCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: processed } = await supabase
+        .from("opportunities")
+        .select("discovered_from_url")
+        .in("discovered_from_url", urls)
+        .gte("last_checked_at", freshCutoff);
+
+    const processedUrls = new Set((processed ?? []).map((p: any) => p.discovered_from_url));
+
+    const toExtract = searchResults.filter((r) => !processedUrls.has(r.url));
+    console.error(`[PERF] skipping ${searchResults.length - toExtract.length} already-processed URLs, extracting ${toExtract.length}`);
+
+    const t1 = Date.now();
     const extracted = (
         await Promise.all(
-            searchResults.map((r) => extractOpportunities(r.content, r.url).catch(() => []))
+            toExtract.map((r) => extractOpportunities(r.content, r.url).catch(() => []))
         )
     ).flat();
+    console.error(`[PERF] extraction: ${Date.now() - t1}ms (${extracted.length} opportunities)`);
 
     const byFingerprint = new Map<string, RankedOpportunity>();
 
