@@ -146,10 +146,8 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
         {
             title: "Find Scholarships",
             description:
-                "Finds scholarships matching the student's stored profile. " +
-                "Returns a pre-formatted 'display_text' field — send that text to the user EXACTLY as written, " +
-                "preserving the eligibility line and 'Why you qualify' for each scholarship. Do not summarize or strip these. " +
-                "Each match also has an opportunity_id for saving.",
+                "Finds scholarships for the student's profile and returns a ready-to-send message. " +
+                "Send the returned text to the user AS-IS. Do not reformat, summarize, shorten, or remove the eligibility lines.",
             inputSchema: {},
         },
         async () => {
@@ -162,7 +160,7 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
 
             if (error) {
                 return {
-                    content: [{ type: "text", text: JSON.stringify({ ok: false, error: error.message }) }],
+                    content: [{ type: "text", text: `Error: ${error.message}` }],
                     isError: true,
                 };
             }
@@ -171,10 +169,7 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
                     content: [
                         {
                             type: "text",
-                            text: JSON.stringify({
-                                ok: false,
-                                error: "No profile found. Ask the student for grade, location, and interests first.",
-                            }),
+                            text: "No profile found yet. Tell me your grade, location, and interests first.",
                         },
                     ],
                 };
@@ -198,8 +193,7 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
                 not_eligible: "✗ Not eligible",
             };
 
-            const lines: string[] = [];
-            const matches = results.map((r, i) => {
+            const lines: string[] = results.map((r, i) => {
                 const o = r.opportunity;
                 const label = labelMap[r.eligibility_status] ?? r.eligibility_status;
                 const why = r.eligibility_reasons.slice(0, 3).join(" · ");
@@ -208,15 +202,13 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
                 const deadline = o.deadline ? ` (deadline ${o.deadline})` : "";
                 const src = o.official_url ?? o.discovered_from_url ?? "";
 
-                lines.push(
+                return (
                     `${i + 1}. ${o.title}${amount}${deadline}\n` +
                     `   ${label}\n` +
                     `   Why you qualify: ${why}\n` +
                     `   ${match}\n` +
                     `   Source: ${src}`
                 );
-
-                return { opportunity_id: r.opportunity_id, title: o.title };
             });
 
             const display_text = lines.length
@@ -227,7 +219,7 @@ export function registerTools(server: McpServer, getUserId: GetUserId) {
                 content: [
                     {
                         type: "text",
-                        text: JSON.stringify({ ok: true, count: matches.length, display_text, matches }, null, 2),
+                        text: display_text,
                     },
                 ],
             };
