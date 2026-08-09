@@ -63,6 +63,7 @@ app.post("/api/demo-search", async (req, res) => {
             deadline: r.opportunity.deadline,
             awardAmount: r.opportunity.award_amount,
             source: r.opportunity.official_url ?? r.opportunity.discovered_from_url,
+            sourceType: r.opportunity.source_type,
         }));
 
         res.json({ ok: true, category: cat, results: out });
