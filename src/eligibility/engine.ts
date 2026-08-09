@@ -68,9 +68,9 @@ export function checkEligibility(
     }
 
     // --- state / residency ---
-    // IMPORTANT: eligible_states is a RESIDENCY restriction (who may apply),
-    // NOT where the opportunity happens. work_mode does NOT bypass it.
-    // Remote only means the student need not travel; residency still applies.
+    // eligible_states is a RESIDENCY restriction (who may apply), NOT where the
+    // opportunity happens. work_mode does NOT bypass it — remote only means the
+    // student need not travel; residency still applies.
     if (opp.eligible_states.length > 0) {
         if (!student.state) {
             missing = true;
@@ -158,45 +158,47 @@ export function checkEligibility(
 export function buildWhyFit(opp: Opportunity, student: StudentProfile): string[] {
     const reasons: string[] = [];
 
-    // interest match
     const text = `${opp.title} ${opp.description ?? ""}`.toLowerCase();
     const hitInterest = student.interests?.find((i) => text.includes(i.toLowerCase()));
-    if (hitInterest) {
-        reasons.push(`Matches your interest in ${hitInterest}.`);
-    }
+    if (hitInterest) reasons.push(`Matches your interest in ${hitInterest}`);
 
-    // grade
     if (student.grade != null && opp.eligible_grades.length > 0 && opp.eligible_grades.includes(student.grade)) {
-        reasons.push(`Open to students in grade ${student.grade}.`);
+        reasons.push(`Open to students in grade ${student.grade}`);
     }
 
-    // age
     if (student.age != null && (opp.minimum_age != null || opp.maximum_age != null)) {
         const okMin = opp.minimum_age == null || student.age >= opp.minimum_age;
         const okMax = opp.maximum_age == null || student.age <= opp.maximum_age;
-        if (okMin && okMax) reasons.push("Your age meets the listed requirement.");
+        if (okMin && okMax) reasons.push("Your age meets the requirement");
     }
 
-    // GPA
     const gpa = student.gpa ?? null;
     if (gpa != null && opp.minimum_gpa != null && gpa >= opp.minimum_gpa) {
-        reasons.push("Your GPA meets the listed minimum.");
+        reasons.push("Your GPA meets the listed minimum");
     }
 
-    // remote
-    if (opp.work_mode === "remote") {
-        reasons.push("Available remotely.");
-    }
+    if (opp.work_mode === "remote") reasons.push("Available remotely");
 
-    // located in your state (physical location, not residency)
     if (opp.location && student.state && opp.location.toLowerCase().includes(student.state.toLowerCase())) {
-        reasons.push("Located in your state.");
+        reasons.push("Located in your state");
     }
 
-    // nationwide (no residency restriction)
     if (opp.eligible_states.length === 0 && reasons.length < 2) {
-        reasons.push("Open to students nationwide.");
+        reasons.push("Open to students nationwide");
     }
 
     return reasons.slice(0, 4);
+}
+
+function capitalize(s: string): string {
+    return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Combine verified reasons into one natural sentence (still deterministic — no invention).
+export function whyFitSentence(opp: Opportunity, student: StudentProfile): string {
+    const reasons = buildWhyFit(opp, student).map((r) => r.charAt(0).toLowerCase() + r.slice(1));
+    if (reasons.length === 0) return "Not enough profile information yet to explain the match.";
+    if (reasons.length === 1) return capitalize(reasons[0]) + ".";
+    const last = reasons.pop();
+    return capitalize(reasons.join(", ")) + ", and " + last + ".";
 }

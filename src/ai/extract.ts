@@ -193,13 +193,15 @@ export type Category = "scholarship" | "internship" | "volunteering" | "program"
 
 type WorkMode = "remote" | "hybrid" | "on_site" | "unknown";
 
-function normalizeWorkMode(raw: string | null | undefined, remoteBool: boolean | undefined): WorkMode {
+function normalizeWorkMode(
+    raw: string | null | undefined,
+    remoteBool: boolean | undefined
+): WorkMode {
     const s = (raw ?? "").toLowerCase().trim();
     if (["remote", "virtual", "fully remote", "work from home", "online"].some((k) => s.includes(k))) return "remote";
     if (["hybrid", "partially remote", "partly remote"].some((k) => s.includes(k))) return "hybrid";
     if (["on_site", "on site", "onsite", "in person", "in-person"].some((k) => s.includes(k))) return "on_site";
     if (s === "remote" || s === "hybrid" || s === "on_site" || s === "unknown") return s as WorkMode;
-    // fall back to legacy boolean only if it clearly says remote
     if (remoteBool === true) return "remote";
     return "unknown";
 }

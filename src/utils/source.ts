@@ -59,7 +59,7 @@ export const COMPETITION_DISCOVERY_DOMAINS = [
     "devpost.com",
 ];
 
-// Directories we trust more than generic aggregators
+// Directories we trust more than generic aggregators.
 const TRUSTED_DIRECTORIES = [
     "careeronestop.org",
     "bigfuture.collegeboard.org",
@@ -70,12 +70,14 @@ const TRUSTED_DIRECTORIES = [
     "joinhandshake.com",
 ];
 
-// Specialized, curated directories for high-school opportunities
+// Specialized, curated directories for high-school opportunities.
+// These are discovery/list pages, NOT official provider sites.
 const SPECIALIZED_DIRECTORIES = [
     "highschoolopportunity.org",
     "atlasofopportunity.org",
     "extracurricularhub.com",
     "standoutsearch.com",
+    "standoutconnect.org",
     "devpost.com",
 ];
 
@@ -96,7 +98,7 @@ const AGGREGATOR_DOMAINS = [
     "sallie.com",
 ];
 
-// Job boards (fine for internships, but generic)
+// Job boards (fine for internships, but generic).
 const JOB_BOARDS = [
     "indeed.com",
     "linkedin.com",
@@ -124,14 +126,14 @@ export function classifySource(url: string): {
         return { source_type: "unknown", source_confidence: "low" };
     }
 
-    const endsWithAny = (list: string[]) => list.some((d) => host === d || host.endsWith("." + d) || host.endsWith(d));
+    const endsWithAny = (list: string[]) =>
+        list.some((d) => host === d || host.endsWith("." + d) || host.endsWith(d));
 
-    // trusted / specialized directories first (before generic .org/.gov catch-all)
-    if (endsWithAny(TRUSTED_DIRECTORIES)) {
-        return { source_type: "trusted_directory", source_confidence: "high" };
-    }
     if (endsWithAny(SPECIALIZED_DIRECTORIES)) {
         return { source_type: "specialized_directory", source_confidence: "medium" };
+    }
+    if (endsWithAny(TRUSTED_DIRECTORIES)) {
+        return { source_type: "trusted_directory", source_confidence: "high" };
     }
     if (endsWithAny(AGGREGATOR_DOMAINS)) {
         return { source_type: "aggregator", source_confidence: "medium" };
@@ -154,7 +156,7 @@ export function classifySource(url: string): {
     return { source_type: "unknown", source_confidence: "low" };
 }
 
-// Ranking bonus by source quality (higher = better)
+// Ranking bonus by source quality (higher = better).
 export function sourceRankBonus(type: SourceType): number {
     switch (type) {
         case "official": return 15;
@@ -166,7 +168,7 @@ export function sourceRankBonus(type: SourceType): number {
     }
 }
 
-// Preferred discovery domains for a given category (for targeted site: searches)
+// Preferred discovery domains for a given category (for targeted site: searches).
 export function preferredDomains(category: string): string[] {
     switch (category) {
         case "internship": return [...INTERNSHIP_DISCOVERY_DOMAINS, ...GENERAL_DISCOVERY_DOMAINS];
