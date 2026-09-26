@@ -4,56 +4,6 @@ Opportunity Finder is a conversational assistant that helps high school students
 
 Instead of only searching for opportunities, it checks requirements against the student's profile, explains why an opportunity is a good match, and helps track opportunities after they are discovered.
 
-## Important Poke Note
-
-Opportunity Finder is currently connected to Poke through a custom MCP integration.
-
-Normally, I would share the project through a Poke Recipe, which would make the setup easier for a new user. However, Poke is currently returning a **500 server error** when I try to submit the Recipe, which prevents me from using the normal Recipe sharing flow.
-
-I reported the issue directly to the Poke team. They were able to reproduce the bug, identify the issue, and told me that a fix is being worked on.
-
-Because this issue is on the Poke side, I currently cannot provide the simpler Recipe link. The MCP integration itself works normally, so Opportunity Finder can still be tested using the integration link below.
-
-## Try Opportunity Finder
-
-### 1. Open the integration link
-
-[Connect Opportunity Finder to Poke](https://poke.com/integrations/new?name=Opportunity%20Finder&url=https%3A%2F%2Fopportunity-finder-production.up.railway.app%2Fmcp)
-
-You may need to sign in or create a Poke account first.
-
-### 2. Create the integration
-
-The page should automatically fill in:
-
-**Name:** Opportunity Finder
-
-**Server URL:**
-
-`https://opportunity-finder-production.up.railway.app/mcp`
-
-No API key is required.
-
-Click **Create Integration**.
-
-### 3. Close the Integrations window
-
-After the integration is created, close the Integrations window and return to the main Poke screen.
-
-### 4. Click Message
-
-Click **Message** and start talking to Poke.
-
-You can try something like:
-
-> I'm a high school senior in North Carolina interested in computer science. Find me internships I qualify for.
-
-or:
-
-> Find me scholarships for high school seniors interested in engineering.
-
-Opportunity Finder will search for relevant opportunities and use its backend to evaluate how well each opportunity matches the student's profile.
-
 ## How it works
 
 Opportunity Finder combines live web discovery, structured AI extraction, and deterministic eligibility checking.
