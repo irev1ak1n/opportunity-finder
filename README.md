@@ -1,4 +1,4 @@
-# Opportunity Finder
+# Opportunity Finder (In Development Process)
 
 Opportunity Finder is a conversational assistant that helps high school students find scholarships, internships, volunteer opportunities, programs, and competitions they actually qualify for.
 
